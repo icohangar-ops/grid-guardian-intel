@@ -45,6 +45,8 @@ import {
   buildSocMarkdown,
   downloadMarkdown,
   openPrintWindow,
+  buildTechniqueEvidence,
+  downloadJson,
 } from "@/lib/sentinel-report";
 
 const assetsQuery = (query?: string, cursor?: string) =>
