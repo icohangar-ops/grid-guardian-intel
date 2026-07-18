@@ -1112,15 +1112,25 @@ function AssetRow({
   brief,
   selected,
   loading,
+  bulk,
+  watched,
+  kevCount,
+  columns,
   onAnalyze,
   onSelect,
+  onToggleWatch,
 }: {
   asset: OsintAsset;
   brief?: ThreatBrief;
   selected: boolean;
   loading: boolean;
+  bulk?: "queued" | "running" | "done" | "error";
+  watched: boolean;
+  kevCount: number;
+  columns: Record<ColumnKey, boolean>;
   onAnalyze: () => void;
   onSelect: () => void;
+  onToggleWatch: () => void;
 }) {
   return (
     <tr
@@ -1129,23 +1139,73 @@ function AssetRow({
         selected ? "bg-accent/60" : "hover:bg-accent/30"
       }`}
     >
-      <td className="px-3 py-3 font-mono text-xs">
-        <div className="font-semibold text-foreground">{asset.ip}:{asset.port}</div>
-        <div className="text-muted-foreground">{asset.org}</div>
-      </td>
-      <td className="px-3 py-3">{asset.protocol}</td>
-      <td className="px-3 py-3 text-muted-foreground">{asset.location}</td>
-      <td className="px-3 py-3">
-        <span
-          className={`inline-block rounded px-2 py-0.5 text-xs font-mono font-semibold ${priorityStyle(
-            brief?.priority,
-          )}`}
-        >
-          {brief?.priority ?? "UNSCORED"}
-        </span>
-      </td>
+      {columns.target && (
+        <td className="px-3 py-3 font-mono text-xs">
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleWatch(); }}
+              className={`shrink-0 ${watched ? "text-chart-4" : "text-muted-foreground/40 hover:text-chart-4"}`}
+              aria-label={watched ? "Unwatch" : "Watch"}
+            >
+              <Star size={12} fill={watched ? "currentColor" : "none"} />
+            </button>
+            <span className="font-semibold text-foreground">{asset.ip}:{asset.port}</span>
+          </div>
+          <div className="mt-0.5 pl-4 text-muted-foreground">{asset.org}</div>
+        </td>
+      )}
+      {columns.protocol && (
+        <td className="px-3 py-3">
+          <div>{asset.protocol}</div>
+          <div className="font-mono text-[10px] text-muted-foreground">:{asset.port}</div>
+        </td>
+      )}
+      {columns.location && (
+        <td className="px-3 py-3 text-muted-foreground">{asset.location}</td>
+      )}
+      {columns.kev && (
+        <td className="px-3 py-3">
+          {kevCount > 0 ? (
+            <span
+              title={`${kevCount} CISA KEV entr${kevCount === 1 ? "y" : "ies"} match ${asset.protocol}`}
+              className="inline-block rounded bg-destructive/15 px-2 py-0.5 font-mono text-[10px] font-semibold text-destructive"
+            >
+              KEV ×{kevCount}
+            </span>
+          ) : (
+            <span className="font-mono text-[10px] text-muted-foreground">—</span>
+          )}
+        </td>
+      )}
+      {columns.priority && (
+        <td className="px-3 py-3">
+          <span
+            className={`inline-block rounded px-2 py-0.5 text-xs font-mono font-semibold ${priorityStyle(
+              brief?.priority,
+            )}`}
+          >
+            {brief?.priority ?? (bulk === "queued" ? "QUEUED" : bulk === "running" ? "RUNNING…" : bulk === "error" ? "ERROR" : "UNSCORED")}
+          </span>
+        </td>
+      )}
+      {columns.analyzed && (
+        <td className="px-3 py-3 font-mono text-[10px] text-muted-foreground">
+          {brief ? new Date(brief.generatedAt).toLocaleTimeString() : "—"}
+        </td>
+      )}
       <td className="px-3 py-3 text-right">
-        <button
+        <div className="flex items-center justify-end gap-1">
+          <Link
+            to="/asset/$ip/$port"
+            params={{ ip: asset.ip, port: String(asset.port) }}
+            search={{ protocol: asset.protocol, sector: asset.sector, location: asset.location, org: asset.org }}
+            onClick={(e) => e.stopPropagation()}
+            className="rounded-md border border-border bg-background p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            title="Open shareable brief"
+          >
+            <ExternalLink size={12} />
+          </Link>
+          <button
           onClick={(e) => {
             e.stopPropagation();
             onAnalyze();
@@ -1155,12 +1215,20 @@ function AssetRow({
         >
           {loading ? "Analyzing…" : brief ? "Re-run" : "Analyze"}
         </button>
+        </div>
       </td>
     </tr>
   );
 }
 
-function BriefPanel({ brief, error }: { brief?: ThreatBrief; error?: string }) {
+function BriefPanel({
+  brief, error, asset, kev,
+}: {
+  brief?: ThreatBrief;
+  error?: string;
+  asset?: OsintAsset;
+  kev?: import("@/lib/sentinel.functions").KevMatch[];
+}) {
   if (error) {
     return (
       <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
@@ -1170,9 +1238,12 @@ function BriefPanel({ brief, error }: { brief?: ThreatBrief; error?: string }) {
   }
   if (!brief) {
     return (
-      <div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
-        Select an asset and run <span className="font-mono">Analyze</span> to fuse
-        technical OSINT with Tavily strategic intelligence.
+      <div className="space-y-3">
+        <div className="rounded-lg border border-dashed border-border p-6 text-sm text-muted-foreground">
+          Select an asset and run <span className="font-mono">Analyze</span> to fuse
+          technical OSINT with Tavily strategic intelligence.
+        </div>
+        {asset && kev && kev.length > 0 && <KevList kev={kev} protocol={asset.protocol} />}
       </div>
     );
   }
@@ -1186,9 +1257,22 @@ function BriefPanel({ brief, error }: { brief?: ThreatBrief; error?: string }) {
         >
           {brief.priority}
         </span>
-        <span className="text-xs text-muted-foreground">
-          {new Date(brief.generatedAt).toLocaleTimeString()}
-        </span>
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span>{new Date(brief.generatedAt).toLocaleTimeString()}</span>
+          <Link
+            to="/asset/$ip/$port"
+            params={{ ip: brief.asset.ip, port: String(brief.asset.port) }}
+            search={{
+              protocol: brief.asset.protocol,
+              sector: brief.asset.sector,
+              location: brief.asset.location,
+              org: brief.asset.org,
+            }}
+            className="inline-flex items-center gap-1 text-primary hover:underline"
+          >
+            <ExternalLink size={10} /> share
+          </Link>
+        </div>
       </div>
       <div>
         <div className="text-xs uppercase tracking-widest text-muted-foreground">
@@ -1201,6 +1285,7 @@ function BriefPanel({ brief, error }: { brief?: ThreatBrief; error?: string }) {
           {brief.asset.org} — {brief.asset.location}
         </div>
       </div>
+      {kev && kev.length > 0 && <KevList kev={kev} protocol={brief.asset.protocol} />}
       <div>
         <div className="text-xs uppercase tracking-widest text-muted-foreground">
           AI Threat Summary
@@ -1230,6 +1315,47 @@ function BriefPanel({ brief, error }: { brief?: ThreatBrief; error?: string }) {
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+function KevList({
+  kev, protocol,
+}: { kev: import("@/lib/sentinel.functions").KevMatch[]; protocol: string }) {
+  const [open, setOpen] = useState(false);
+  const shown = open ? kev : kev.slice(0, 3);
+  return (
+    <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <div className="text-xs font-mono uppercase tracking-widest text-destructive">
+          CISA KEV · {protocol} ({kev.length})
+        </div>
+        {kev.length > 3 && (
+          <button
+            onClick={() => setOpen((v) => !v)}
+            className="text-[10px] font-mono uppercase text-muted-foreground hover:text-foreground"
+          >
+            {open ? "collapse" : "show all"}
+          </button>
+        )}
+      </div>
+      <ul className="space-y-1 text-xs">
+        {shown.map((k) => (
+          <li key={k.cveId} className="flex items-baseline gap-2">
+            <a
+              href={`https://nvd.nist.gov/vuln/detail/${k.cveId}`}
+              target="_blank"
+              rel="noreferrer"
+              className="w-32 shrink-0 font-mono text-primary underline-offset-2 hover:underline"
+            >
+              {k.cveId}
+            </a>
+            <span className="truncate text-muted-foreground" title={k.shortDescription}>
+              {k.vendor} — {k.product}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }
