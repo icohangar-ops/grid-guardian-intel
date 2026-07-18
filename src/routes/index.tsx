@@ -402,11 +402,23 @@ function SentinelDashboard() {
     <div className="min-h-screen bg-background text-foreground">
       <header className="border-b border-border">
         <div className="mx-auto max-w-7xl px-6 py-8">
-          <div className="flex items-center gap-3">
-            <div className="h-3 w-3 rounded-full bg-destructive animate-pulse" />
-            <span className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
-              Sentinel-OSINT // US Homeland Scope
-            </span>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="h-3 w-3 rounded-full bg-destructive animate-pulse" />
+              <span className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
+                Sentinel-OSINT // US Homeland Scope
+              </span>
+            </div>
+            <nav className="flex items-center gap-3 text-xs font-mono uppercase tracking-widest">
+              <span className="text-primary">Matrix</span>
+              <span className="text-muted-foreground">·</span>
+              <Link
+                to="/map"
+                className="text-muted-foreground hover:text-foreground"
+              >
+                Geo Map
+              </Link>
+            </nav>
           </div>
           <h1 className="mt-3 text-4xl font-bold tracking-tight">
             Cyber-Physical Threat Matrix
