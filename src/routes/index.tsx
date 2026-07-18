@@ -1004,7 +1004,7 @@ function AttackHeatmap({ briefs }: { briefs: Record<string, ThreatBrief> }) {
 function AttackPanel({
   attack,
 }: {
-  attack: import("@/lib/sentinel.functions").AttackMapping[];
+  attack: AttackMapping[];
 }) {
   if (!attack.length) {
     return (
