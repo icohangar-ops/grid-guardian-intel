@@ -4,6 +4,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import {
   analyzeAsset,
+  scoreAttack,
   type OsintAsset,
   type ThreatBrief,
 } from "@/lib/sentinel.functions";
@@ -128,23 +129,37 @@ function SharedBrief() {
                   MITRE ATT&amp;CK · {brief.attack.length}
                 </div>
                 <div className="flex flex-wrap gap-1">
-                  {brief.attack.map((t) => (
-                    <a
-                      key={`${t.matrix}:${t.techniqueId}`}
-                      href={t.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      title={`${t.tacticName} — matched: ${t.matched.join(", ")}`}
-                      className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[10px] hover:bg-accent ${
-                        t.matrix === "ics"
-                          ? "border-chart-4/40 bg-chart-4/10 text-chart-4"
-                          : "border-primary/40 bg-primary/10 text-primary"
-                      }`}
-                    >
-                      <span className="font-semibold">{t.techniqueId}</span>
-                      <span className="text-foreground/80">{t.techniqueName}</span>
-                    </a>
-                  ))}
+                  {brief.attack.map((t) => {
+                    const conf = scoreAttack(t);
+                    const bandStyle =
+                      conf.band === "high"
+                        ? "border-destructive/60 bg-destructive/15 text-destructive"
+                        : conf.band === "medium"
+                          ? "border-chart-3/50 bg-chart-3/10 text-chart-3"
+                          : "border-muted-foreground/40 bg-muted/40 text-muted-foreground";
+                    return (
+                      <a
+                        key={`${t.matrix}:${t.techniqueId}`}
+                        href={t.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={`${t.tacticName} · ${t.techniqueName}\nConfidence ${conf.score}% (${conf.band})\nRationale: ${conf.rationale}`}
+                        className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[10px] hover:bg-accent ${
+                          t.matrix === "ics"
+                            ? "border-chart-4/40 bg-chart-4/10 text-chart-4"
+                            : "border-primary/40 bg-primary/10 text-primary"
+                        }`}
+                      >
+                        <span className="font-semibold">{t.techniqueId}</span>
+                        <span className="text-foreground/80">{t.techniqueName}</span>
+                        <span
+                          className={`ml-1 rounded-sm border px-1 py-[1px] text-[9px] font-semibold tabular-nums ${bandStyle}`}
+                        >
+                          {conf.score}%
+                        </span>
+                      </a>
+                    );
+                  })}
                 </div>
               </div>
             )}
