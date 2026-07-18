@@ -5,8 +5,10 @@ import { useState } from "react";
 import {
   listExposedAssets,
   analyzeAsset,
+  getReconToolkit,
   type ThreatBrief,
   type OsintAsset,
+  type ReconToolkit,
 } from "@/lib/sentinel.functions";
 
 const assetsQuery = (query?: string, cursor?: string) =>
@@ -49,8 +51,10 @@ function SentinelDashboard() {
     assetsQuery(activeQuery, currentCursor),
   );
   const analyzeFn = useServerFn(analyzeAsset);
+  const reconFn = useServerFn(getReconToolkit);
   // Briefs are keyed by asset.id (ip:port), so mapping survives across pages.
   const [briefs, setBriefs] = useState<Record<string, ThreatBrief>>({});
+  const [toolkits, setToolkits] = useState<Record<string, ReconToolkit>>({});
   const [selected, setSelected] = useState<string | null>(null);
 
   const mutation = useMutation({
@@ -58,6 +62,13 @@ function SentinelDashboard() {
     onSuccess: (brief) => {
       setBriefs((prev) => ({ ...prev, [brief.asset.id]: brief }));
       setSelected(brief.asset.id);
+    },
+  });
+
+  const reconMutation = useMutation({
+    mutationFn: (asset: OsintAsset) => reconFn({ data: { asset } }),
+    onSuccess: (kit) => {
+      setToolkits((prev) => ({ ...prev, [kit.asset.id]: kit }));
     },
   });
 
@@ -193,6 +204,16 @@ function SentinelDashboard() {
           <BriefPanel
             brief={selected ? briefs[selected] : undefined}
             error={mutation.error?.message}
+          />
+          <h2 className="mb-3 mt-6 text-xs font-mono uppercase tracking-widest text-muted-foreground">
+            Recon Toolkit · OSINT Framework
+          </h2>
+          <ToolkitPanel
+            asset={selected ? feed.assets.find((a) => a.id === selected) : undefined}
+            toolkit={selected ? toolkits[selected] : undefined}
+            loading={reconMutation.isPending}
+            error={reconMutation.error?.message}
+            onLoad={(asset) => reconMutation.mutate(asset)}
           />
         </aside>
       </main>
