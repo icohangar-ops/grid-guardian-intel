@@ -47,6 +47,15 @@ const PROTOCOL_BY_PORT: Record<number, { protocol: string; sector: string }> = {
 const DEFAULT_CENSYS_QUERY =
   "services.service_name: {MODBUS, S7, DNP3, IEC_60870_5_104, FOX, BACNET, ETHERNET_IP}";
 
+// Homeland scope — Sentinel-OSINT targets US critical infrastructure only.
+const US_SCOPE = "location.country_code: US";
+
+function scopeToUS(query: string): string {
+  // Idempotent: don't double-append if the caller already scoped by country.
+  if (/location\.country_code\s*:/i.test(query)) return query;
+  return `(${query}) and ${US_SCOPE}`;
+}
+
 type CensysHit = {
   ip?: string;
   location?: { country?: string; province?: string; city?: string };
@@ -104,13 +113,14 @@ export const listExposedAssets = createServerFn({ method: "GET" })
   .inputValidator((input?: { query?: string; cursor?: string }) => input ?? {})
   .handler(async ({ data }): Promise<AssetFeed> => {
     const query = data.query?.trim() || DEFAULT_CENSYS_QUERY;
+    const scopedQuery = scopeToUS(query);
     const cursor = data.cursor?.trim() || undefined;
     const apiKey = process.env.CENSYS_API_KEY;
     if (!apiKey) {
       return {
-        assets: MOCK_ASSETS,
+        assets: MOCK_ASSETS.filter((a) => /USA|United States/i.test(a.location)),
         source: "mock",
-        query,
+        query: scopedQuery,
         pageSize: PAGE_SIZE,
         error: "Missing CENSYS_API_KEY",
       };
@@ -123,7 +133,7 @@ export const listExposedAssets = createServerFn({ method: "GET" })
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          query,
+          query: scopedQuery,
           page_size: PAGE_SIZE,
           ...(cursor ? { cursor } : {}),
         }),
@@ -132,9 +142,9 @@ export const listExposedAssets = createServerFn({ method: "GET" })
         const body = await res.text();
         console.error(`Censys error [${res.status}]: ${body}`);
         return {
-          assets: MOCK_ASSETS,
+          assets: MOCK_ASSETS.filter((a) => /USA|United States/i.test(a.location)),
           source: "mock",
-          query,
+          query: scopedQuery,
           pageSize: PAGE_SIZE,
           error: `Censys request failed [${res.status}] — showing mock feed`,
         };
@@ -161,20 +171,20 @@ export const listExposedAssets = createServerFn({ method: "GET" })
       const assets = normalizeCensys(hits);
       if (!assets.length && !cursor) {
         return {
-          assets: MOCK_ASSETS,
+          assets: MOCK_ASSETS.filter((a) => /USA|United States/i.test(a.location)),
           source: "mock",
-          query,
+          query: scopedQuery,
           pageSize: PAGE_SIZE,
           error: "Censys returned no hits — showing mock feed",
         };
       }
-      return { assets, source: "censys", query, nextCursor, pageSize: PAGE_SIZE };
+      return { assets, source: "censys", query: scopedQuery, nextCursor, pageSize: PAGE_SIZE };
     } catch (err) {
       console.error("Censys ingestion failed", err);
       return {
-        assets: MOCK_ASSETS,
+        assets: MOCK_ASSETS.filter((a) => /USA|United States/i.test(a.location)),
         source: "mock",
-        query,
+        query: scopedQuery,
         pageSize: PAGE_SIZE,
         error: (err as Error).message,
       };
