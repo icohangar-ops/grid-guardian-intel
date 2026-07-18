@@ -1,0 +1,33 @@
+name: Mirror to Cubiczan (GitHub + Codeberg)
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to Cubiczan GitHub
+        if: ${{ secrets.CUBICZAN_GH_PAT != '' }}
+        env:
+          PAT: ${{ secrets.CUBICZAN_GH_PAT }}
+          REPO: ${{ secrets.CUBICZAN_GH_REPO }} # e.g. Cubiczan/gridsentinel
+        run: |
+          git remote add cubiczan-gh "https://x-access-token:${PAT}@github.com/${REPO}.git"
+          git push --prune --force cubiczan-gh "refs/remotes/origin/*:refs/heads/*" "refs/tags/*:refs/tags/*"
+
+      - name: Push to Codeberg
+        if: ${{ secrets.CODEBERG_PAT != '' }}
+        env:
+          PAT: ${{ secrets.CODEBERG_PAT }}
+          REPO: ${{ secrets.CODEBERG_REPO }} # e.g. Cubiczan/gridsentinel
+        run: |
+          git remote add codeberg "https://Cubiczan:${PAT}@codeberg.org/${REPO}.git"
+          git push --prune --force codeberg "refs/remotes/origin/*:refs/heads/*" "refs/tags/*:refs/tags/*"
