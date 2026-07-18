@@ -1278,6 +1278,20 @@ function AttackEvidenceDialog({
   const idHit = technique.matched.some(
     (k) => k.toLowerCase() === technique.techniqueId.toLowerCase(),
   );
+  const [filter, setFilter] = useState("");
+  const q = filter.trim().toLowerCase();
+  const matchStr = (s: string) => !q || s.toLowerCase().includes(q);
+  const idHitVisible = idHit && (matchStr(technique.techniqueId) || matchStr("id reference"));
+  const keywordMatches = technique.matched.filter(
+    (k) => k.toLowerCase() !== technique.techniqueId.toLowerCase() && !k.startsWith("actor:"),
+  );
+  const visibleKeywords = keywordMatches.filter(matchStr);
+  const visibleActors = actorMatches.filter((k) => matchStr(k.replace(/^actor:/, "")));
+  const visibleSnippets = snippets.filter(
+    (s) => matchStr(s.snippet) || matchStr(s.keyword.replace(/^actor:/, "")),
+  );
+  const visibleSourceCount =
+    (idHitVisible ? 1 : 0) + visibleKeywords.length + visibleActors.length;
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-2xl">
@@ -1301,6 +1315,36 @@ function AttackEvidenceDialog({
         </DialogHeader>
 
         <div className="space-y-4 text-sm">
+          <div>
+            <label className="mb-1 block text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+              Filter evidence
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="search"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filter keywords, actors, or snippet text…"
+                className="h-7 flex-1 rounded border border-border bg-background px-2 font-mono text-xs outline-none focus:border-primary"
+              />
+              {filter && (
+                <button
+                  type="button"
+                  onClick={() => setFilter("")}
+                  className="rounded border border-border bg-background px-2 py-1 font-mono text-[10px] uppercase tracking-widest hover:bg-accent"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            {q && (
+              <div className="mt-1 font-mono text-[10px] text-muted-foreground">
+                {visibleSourceCount} signal{visibleSourceCount === 1 ? "" : "s"} · {visibleSnippets.length} snippet
+                {visibleSnippets.length === 1 ? "" : "s"}
+              </div>
+            )}
+          </div>
+
           <section>
             <div className="mb-1 text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
               Rationale
@@ -1314,17 +1358,21 @@ function AttackEvidenceDialog({
 
           <section>
             <div className="mb-1 text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
-              Matched signals ({technique.matched.length})
+              Matched signals ({visibleSourceCount}
+              {q ? ` / ${technique.matched.length}` : ""})
             </div>
+            {q && visibleSourceCount === 0 ? (
+              <div className="rounded border border-dashed border-border p-2 text-xs text-muted-foreground">
+                No signals match “{filter}”.
+              </div>
+            ) : (
             <div className="flex flex-wrap gap-1">
-              {idHit && (
+              {idHitVisible && (
                 <span className="rounded border border-destructive/60 bg-destructive/15 px-1.5 py-0.5 font-mono text-[10px] text-destructive">
                   ID reference: {technique.techniqueId}
                 </span>
               )}
-              {technique.matched
-                .filter((k) => k.toLowerCase() !== technique.techniqueId.toLowerCase() && !k.startsWith("actor:"))
-                .map((k) => (
+              {visibleKeywords.map((k) => (
                   <span
                     key={k}
                     className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-foreground"
@@ -1332,7 +1380,7 @@ function AttackEvidenceDialog({
                     “{k}”
                   </span>
                 ))}
-              {actorMatches.map((k) => (
+              {visibleActors.map((k) => (
                 <span
                   key={k}
                   className="rounded border border-chart-3/50 bg-chart-3/10 px-1.5 py-0.5 font-mono text-[10px] text-chart-3"
@@ -1341,25 +1389,31 @@ function AttackEvidenceDialog({
                 </span>
               ))}
             </div>
+            )}
           </section>
 
           <section>
             <div className="mb-1 text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
-              Source snippets from brief
+              Source snippets from brief ({visibleSnippets.length}
+              {q ? ` / ${snippets.length}` : ""})
             </div>
             {snippets.length === 0 ? (
               <div className="rounded border border-dashed border-border p-2 text-xs text-muted-foreground">
                 No direct quotes located in the brief text. Match likely comes from an inferred
                 actor or from the technique ID appearing outside quoted context.
               </div>
+            ) : visibleSnippets.length === 0 ? (
+              <div className="rounded border border-dashed border-border p-2 text-xs text-muted-foreground">
+                No snippets match “{filter}”.
+              </div>
             ) : (
               <ul className="space-y-2">
-                {snippets.map((s, i) => (
+                {visibleSnippets.map((s, i) => (
                   <li key={i} className="rounded border border-border bg-background/60 p-2 text-xs leading-relaxed">
                     <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
                       matched: “{s.keyword.replace(/^actor:/, "actor:")}”
                     </div>
-                    <HighlightedSnippet text={s.snippet} keyword={s.keyword.replace(/^actor:/, "")} />
+                    <HighlightedSnippet text={s.snippet} keyword={q || s.keyword.replace(/^actor:/, "")} />
                   </li>
                 ))}
               </ul>
