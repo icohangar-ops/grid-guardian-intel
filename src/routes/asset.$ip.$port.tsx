@@ -225,6 +225,15 @@ function SharedEvidenceDialog({
   const snippets = brief?.summary
     ? extractSnippets(brief.summary, technique.matched, { radius: 120, maxPerKeyword: 2 })
     : [];
+  const [filter, setFilter] = useState("");
+  const q = filter.trim().toLowerCase();
+  const matchStr = (s: string) => !q || s.toLowerCase().includes(q);
+  const visibleMatched = technique.matched.filter((k) =>
+    matchStr(k.startsWith("actor:") ? k.slice(6) : k),
+  );
+  const visibleSnippets = snippets.filter(
+    (s) => matchStr(s.snippet) || matchStr(s.keyword.replace(/^actor:/, "")),
+  );
   const bandStyle =
     conf.band === "high"
       ? "border-destructive/60 bg-destructive/15 text-destructive"
@@ -251,6 +260,29 @@ function SharedEvidenceDialog({
           </div>
         </DialogHeader>
         <div className="space-y-4 text-sm">
+          <div>
+            <label className="mb-1 block text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+              Filter evidence
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="search"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filter keywords, actors, or snippet text…"
+                className="h-7 flex-1 rounded border border-border bg-background px-2 font-mono text-xs outline-none focus:border-primary"
+              />
+              {filter && (
+                <button
+                  type="button"
+                  onClick={() => setFilter("")}
+                  className="rounded border border-border bg-background px-2 py-1 font-mono text-[10px] uppercase tracking-widest hover:bg-accent"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
           <section>
             <div className="mb-1 text-[10px] font-mono uppercase tracking-widest text-muted-foreground">Rationale</div>
             <ul className="list-disc space-y-1 pl-5 text-xs leading-relaxed">
@@ -259,27 +291,39 @@ function SharedEvidenceDialog({
           </section>
           <section>
             <div className="mb-1 text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
-              Matched signals ({technique.matched.length})
+              Matched signals ({visibleMatched.length}
+              {q ? ` / ${technique.matched.length}` : ""})
             </div>
+            {q && visibleMatched.length === 0 ? (
+              <div className="rounded border border-dashed border-border p-2 text-xs text-muted-foreground">
+                No signals match “{filter}”.
+              </div>
+            ) : (
             <div className="flex flex-wrap gap-1">
-              {technique.matched.map((k) => (
+              {visibleMatched.map((k) => (
                 <span key={k} className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px]">
                   {k.startsWith("actor:") ? `actor: ${k.slice(6)}` : `“${k}”`}
                 </span>
               ))}
             </div>
+            )}
           </section>
           <section>
             <div className="mb-1 text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
-              Source snippets from brief
+              Source snippets from brief ({visibleSnippets.length}
+              {q ? ` / ${snippets.length}` : ""})
             </div>
             {snippets.length === 0 ? (
               <div className="rounded border border-dashed border-border p-2 text-xs text-muted-foreground">
                 No direct quotes located in the brief text.
               </div>
+            ) : visibleSnippets.length === 0 ? (
+              <div className="rounded border border-dashed border-border p-2 text-xs text-muted-foreground">
+                No snippets match “{filter}”.
+              </div>
             ) : (
               <ul className="space-y-2">
-                {snippets.map((s, i) => (
+                {visibleSnippets.map((s, i) => (
                   <li key={i} className="rounded border border-border bg-background/60 p-2 text-xs leading-relaxed">
                     <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
                       matched: “{s.keyword.replace(/^actor:/, "actor:")}”
