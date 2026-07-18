@@ -2,8 +2,9 @@ import { createServerFn } from "@tanstack/react-start";
 
 // ─────────────────────────────────────────────────────────────
 // Geo situational-awareness feeds + Tavily radius news sweep.
-// All feeds here are keyless & free:
+// Cached GeoEvent store aggregating:
 //   - GDACS   (global disasters, wildfires, storms, floods)
+//   - FIRMS   (NASA active fire detections, VIIRS SNPP NRT — requires FIRMS_MAP_KEY)
 //   - USGS    (earthquakes ≥ significant, past week)
 //   - NOAA    (weather.gov active alerts, per US state)
 // Tavily radius sweep re-uses the existing TAVILY_API_KEY secret.
@@ -11,7 +12,7 @@ import { createServerFn } from "@tanstack/react-start";
 
 export type GeoEvent = {
   id: string;
-  source: "gdacs" | "usgs" | "noaa" | "tavily";
+  source: "gdacs" | "firms" | "usgs" | "noaa" | "tavily";
   type: string; // wildfire, flood, earthquake, storm, alert…
   title: string;
   lat?: number;
@@ -216,17 +217,86 @@ async function fetchNoaa(): Promise<GeoEvent[]> {
   return out;
 }
 
+// ─── NASA FIRMS active fires (VIIRS SNPP NRT, past 1 day, CONUS+) ──
+// Docs: https://firms.modaps.eosdis.nasa.gov/api/area/
+// CSV columns: latitude,longitude,bright_ti4,scan,track,acq_date,acq_time,
+//              satellite,instrument,confidence,version,bright_ti5,frp,daynight
+// Area = west,south,east,north. Covers CONUS + AK/HI corridor + border overlap.
+const FIRMS_AREA = "-172,17,-64,72";
+const FIRMS_SOURCE = "VIIRS_SNPP_NRT";
+const FIRMS_DAY_RANGE = 1;
+
+async function fetchFirms(): Promise<GeoEvent[]> {
+  const key = process.env.FIRMS_MAP_KEY;
+  if (!key) throw new Error("FIRMS_MAP_KEY missing");
+  const url = `https://firms.modaps.eosdis.nasa.gov/api/area/csv/${key}/${FIRMS_SOURCE}/${FIRMS_AREA}/${FIRMS_DAY_RANGE}`;
+  const res = await fetch(url, { headers: { "User-Agent": "sentinel-osint/1.0" } });
+  if (!res.ok) throw new Error(`FIRMS ${res.status}`);
+  const text = await res.text();
+  // FIRMS returns plaintext error bodies (e.g. "Invalid MAP_KEY") with 200 sometimes.
+  if (!text.startsWith("latitude") && !text.startsWith("country_id,latitude")) {
+    throw new Error(`FIRMS: ${text.slice(0, 80)}`);
+  }
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  const header = lines.shift()!.split(",");
+  const idx = (k: string) => header.indexOf(k);
+  const iLat = idx("latitude");
+  const iLon = idx("longitude");
+  const iDate = idx("acq_date");
+  const iTime = idx("acq_time");
+  const iConf = idx("confidence");
+  const iFrp = idx("frp");
+  const iSat = idx("satellite");
+  const iDay = idx("daynight");
+  const out: GeoEvent[] = [];
+  for (const line of lines) {
+    const c = line.split(",");
+    const lat = Number(c[iLat]);
+    const lon = Number(c[iLon]);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    const frp = Number(c[iFrp]); // fire radiative power, MW
+    const conf = (c[iConf] ?? "").toLowerCase(); // n/l/h (VIIRS)
+    // Severity from FRP + confidence
+    let sev: GeoEvent["severity"] = "minor";
+    if (frp >= 100) sev = "extreme";
+    else if (frp >= 30) sev = "severe";
+    else if (frp >= 10) sev = "moderate";
+    else sev = conf === "h" ? "moderate" : conf === "l" ? "info" : "minor";
+    const date = c[iDate];
+    const time = (c[iTime] ?? "0000").padStart(4, "0");
+    const startedAt = date ? `${date}T${time.slice(0, 2)}:${time.slice(2)}:00Z` : undefined;
+    out.push({
+      id: `firms:${date}:${time}:${lat.toFixed(3)}:${lon.toFixed(3)}`,
+      source: "firms",
+      type: "wildfire",
+      title: `Active fire · ${Number.isFinite(frp) ? `${frp.toFixed(1)} MW` : "FRP n/a"} (${c[iSat] ?? "VIIRS"} ${c[iDay] ?? ""})`.trim(),
+      lat,
+      lon,
+      severity: sev,
+      startedAt,
+      url: `https://firms.modaps.eosdis.nasa.gov/map/#d:${date};@${lon.toFixed(2)},${lat.toFixed(2)},9z`,
+      snippet: `Confidence: ${conf || "n/a"} · FRP: ${Number.isFinite(frp) ? frp.toFixed(1) : "n/a"} MW`,
+    });
+  }
+  // FIRMS can return thousands of pixels; sort by FRP-derived severity and cap.
+  const sevRank: Record<GeoEvent["severity"], number> = { extreme: 4, severe: 3, moderate: 2, minor: 1, info: 0 };
+  out.sort((a, b) => sevRank[b.severity] - sevRank[a.severity]);
+  return out.slice(0, 500);
+}
+
 // ─── In-memory cache (per worker instance) ──────────────────
 type CacheEntry = { at: number; events: GeoEvent[] };
 const CACHE: Record<string, CacheEntry> = {};
 const TTL_MS = 15 * 60 * 1000;
 
-async function loadFeed(name: "gdacs" | "usgs" | "noaa"): Promise<{ events: GeoEvent[]; error?: string }> {
+type FeedName = "gdacs" | "firms" | "usgs" | "noaa";
+async function loadFeed(name: FeedName): Promise<{ events: GeoEvent[]; error?: string }> {
   const cached = CACHE[name];
   if (cached && Date.now() - cached.at < TTL_MS) return { events: cached.events };
   try {
     const events =
       name === "gdacs" ? await fetchGdacs()
+      : name === "firms" ? await fetchFirms()
       : name === "usgs" ? await fetchUsgs()
       : await fetchNoaa();
     CACHE[name] = { at: Date.now(), events };
@@ -236,6 +306,17 @@ async function loadFeed(name: "gdacs" | "usgs" | "noaa"): Promise<{ events: GeoE
     if (cached) return { events: cached.events, error: `${name}: ${(err as Error).message} (stale)` };
     return { events: [], error: `${name}: ${(err as Error).message}` };
   }
+}
+
+async function loadAllFeeds(): Promise<{ events: GeoEvent[]; errors: string[] }> {
+  const [g, f, u, n] = await Promise.all([
+    loadFeed("gdacs"),
+    loadFeed("firms"),
+    loadFeed("usgs"),
+    loadFeed("noaa"),
+  ]);
+  const errors = [g.error, f.error, u.error, n.error].filter(Boolean) as string[];
+  return { events: [...g.events, ...f.events, ...u.events, ...n.events], errors };
 }
 
 // ─── Tavily radius news sweep ───────────────────────────────
@@ -300,13 +381,8 @@ export const getProximityFeed = createServerFn({ method: "POST" })
       typeof data.lat === "number" && typeof data.lon === "number"
         ? { lat: data.lat, lon: data.lon }
         : null;
-    const errors: string[] = [];
-    const [g, u, n] = await Promise.all([loadFeed("gdacs"), loadFeed("usgs"), loadFeed("noaa")]);
-    if (g.error) errors.push(g.error);
-    if (u.error) errors.push(u.error);
-    if (n.error) errors.push(n.error);
-
-    let events: GeoEvent[] = [...g.events, ...u.events, ...n.events];
+    const { events: allEvents, errors } = await loadAllFeeds();
+    let events: GeoEvent[] = allEvents;
 
     if (center) {
       // Include neighboring CA/MX events within radius (auto — no country filter).
@@ -354,11 +430,10 @@ export const getProximityFeed = createServerFn({ method: "POST" })
 // Un-scoped variant: pull all events for the map view.
 export const getGlobalGeoEvents = createServerFn({ method: "GET" }).handler(
   async (): Promise<{ events: GeoEvent[]; errors: string[]; fetchedAt: string }> => {
-    const [g, u, n] = await Promise.all([loadFeed("gdacs"), loadFeed("usgs"), loadFeed("noaa")]);
-    const errors = [g.error, u.error, n.error].filter(Boolean) as string[];
+    const { events: allEvents, errors } = await loadAllFeeds();
     // Prioritize higher-severity + newer events; cap for wire size.
     const rank: Record<GeoEvent["severity"], number> = { extreme: 4, severe: 3, moderate: 2, minor: 1, info: 0 };
-    const events = [...g.events, ...u.events, ...n.events]
+    const events = allEvents
       .filter((e) => typeof e.lat === "number" && typeof e.lon === "number")
       .sort((a, b) => {
         const r = (rank[b.severity] ?? 0) - (rank[a.severity] ?? 0);
