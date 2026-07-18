@@ -1391,6 +1391,7 @@ function AttackEvidenceDialog({
         </div>
 
         <DialogFooter>
+          <EvidenceExportButtons technique={technique} brief={brief} />
           <a
             href={technique.url}
             target="_blank"
@@ -1402,6 +1403,52 @@ function AttackEvidenceDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function EvidenceExportButtons({
+  technique,
+  brief,
+}: {
+  technique: AttackMapping;
+  brief: ThreatBrief | undefined;
+}) {
+  const doExport = (kind: "json" | "pdf" | "md") => {
+    const ev = buildTechniqueEvidence(technique, brief);
+    if (kind === "json") downloadJson(`${ev.filenameBase}.json`, ev.json);
+    else if (kind === "md") downloadMarkdown(`${ev.filenameBase}.md`, ev.markdown);
+    else openPrintWindow(ev.title, ev.markdown);
+  };
+  return (
+    <div className="mr-auto flex flex-wrap items-center gap-1">
+      <span className="mr-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+        Export evidence:
+      </span>
+      <button
+        type="button"
+        onClick={() => doExport("json")}
+        className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 font-mono text-[10px] uppercase tracking-widest hover:bg-accent"
+        title="Download rationale, matched signals and sources as JSON"
+      >
+        <Download size={10} /> JSON
+      </button>
+      <button
+        type="button"
+        onClick={() => doExport("md")}
+        className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 font-mono text-[10px] uppercase tracking-widest hover:bg-accent"
+        title="Download as Markdown"
+      >
+        <Download size={10} /> MD
+      </button>
+      <button
+        type="button"
+        onClick={() => doExport("pdf")}
+        className="inline-flex items-center gap-1 rounded border border-primary/60 bg-primary/10 px-2 py-1 font-mono text-[10px] uppercase tracking-widest text-primary hover:bg-primary/20"
+        title="Open print-ready view (save as PDF from the browser dialog)"
+      >
+        <Download size={10} /> PDF
+      </button>
+    </div>
   );
 }
 
