@@ -9,10 +9,11 @@ import {
   type OsintAsset,
 } from "@/lib/sentinel.functions";
 
-const assetsQuery = queryOptions({
-  queryKey: ["sentinel", "assets"],
-  queryFn: () => listExposedAssets(),
-});
+const assetsQuery = (query?: string) =>
+  queryOptions({
+    queryKey: ["sentinel", "assets", query ?? ""],
+    queryFn: () => listExposedAssets({ data: { query } }),
+  });
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -33,18 +34,20 @@ export const Route = createFileRoute("/")({
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
-  loader: ({ context }) => context.queryClient.ensureQueryData(assetsQuery),
+  loader: ({ context }) => context.queryClient.ensureQueryData(assetsQuery()),
   component: SentinelDashboard,
 });
 
 function SentinelDashboard() {
-  const { data: assets } = useSuspenseQuery(assetsQuery);
+  const [query, setQuery] = useState<string>("");
+  const [activeQuery, setActiveQuery] = useState<string>("");
+  const { data: feed, isFetching, refetch } = useSuspenseQuery(assetsQuery(activeQuery));
   const analyzeFn = useServerFn(analyzeAsset);
   const [briefs, setBriefs] = useState<Record<string, ThreatBrief>>({});
   const [selected, setSelected] = useState<string | null>(null);
 
   const mutation = useMutation({
-    mutationFn: (assetId: string) => analyzeFn({ data: { assetId } }),
+    mutationFn: (asset: OsintAsset) => analyzeFn({ data: { asset } }),
     onSuccess: (brief) => {
       setBriefs((prev) => ({ ...prev, [brief.asset.id]: brief }));
       setSelected(brief.asset.id);
@@ -74,9 +77,46 @@ function SentinelDashboard() {
 
       <main className="mx-auto grid max-w-7xl gap-6 px-6 py-8 lg:grid-cols-[1.4fr_1fr]">
         <section>
-          <h2 className="mb-3 text-xs font-mono uppercase tracking-widest text-muted-foreground">
-            Exposed Assets ({assets.length})
-          </h2>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h2 className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
+              Exposed Assets ({feed.assets.length}) ·{" "}
+              <span
+                className={
+                  feed.source === "censys"
+                    ? "text-chart-2"
+                    : "text-chart-4"
+                }
+              >
+                {feed.source === "censys" ? "LIVE / CENSYS" : "MOCK FEED"}
+              </span>
+            </h2>
+            <div className="flex items-center gap-2">
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") setActiveQuery(query);
+                }}
+                placeholder="Censys query (e.g. services.port: 502)"
+                className="w-72 rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs"
+              />
+              <button
+                onClick={() => {
+                  setActiveQuery(query);
+                  refetch();
+                }}
+                disabled={isFetching}
+                className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50"
+              >
+                {isFetching ? "Querying…" : "Ingest"}
+              </button>
+            </div>
+          </div>
+          {feed.error && (
+            <div className="mb-3 rounded-md border border-chart-4/40 bg-chart-4/10 px-3 py-2 text-xs text-chart-4">
+              {feed.error}
+            </div>
+          )}
           <div className="overflow-hidden rounded-lg border border-border">
             <table className="w-full text-sm">
               <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
@@ -89,14 +129,14 @@ function SentinelDashboard() {
                 </tr>
               </thead>
               <tbody>
-                {assets.map((asset) => (
+                {feed.assets.map((asset) => (
                   <AssetRow
                     key={asset.id}
                     asset={asset}
                     brief={briefs[asset.id]}
                     selected={selected === asset.id}
-                    loading={mutation.isPending && mutation.variables === asset.id}
-                    onAnalyze={() => mutation.mutate(asset.id)}
+                    loading={mutation.isPending && mutation.variables?.id === asset.id}
+                    onAnalyze={() => mutation.mutate(asset)}
                     onSelect={() => setSelected(asset.id)}
                   />
                 ))}
