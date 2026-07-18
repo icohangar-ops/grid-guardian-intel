@@ -831,6 +831,174 @@ function GeoHeatmap({ counts }: { counts: [string, number][] }) {
   );
 }
 
+// ─── ATT&CK tactics heatmap (time-ranged) ─────────────────────
+const RANGE_PRESETS: { key: string; label: string; ms: number | null }[] = [
+  { key: "1h", label: "1h", ms: 60 * 60 * 1000 },
+  { key: "24h", label: "24h", ms: 24 * 60 * 60 * 1000 },
+  { key: "7d", label: "7d", ms: 7 * 24 * 60 * 60 * 1000 },
+  { key: "30d", label: "30d", ms: 30 * 24 * 60 * 60 * 1000 },
+  { key: "all", label: "all", ms: null },
+];
+
+function AttackHeatmap({ briefs }: { briefs: Record<string, ThreatBrief> }) {
+  const [rangeKey, setRangeKey] = useState<string>("24h");
+  const [matrixFilter, setMatrixFilter] = useState<"all" | "ics" | "enterprise">("all");
+
+  const stats = useMemo(() => {
+    const range = RANGE_PRESETS.find((r) => r.key === rangeKey) ?? RANGE_PRESETS[1];
+    const cutoff = range.ms == null ? 0 : Date.now() - range.ms;
+    const inRange: ThreatBrief[] = [];
+    for (const b of Object.values(briefs)) {
+      const t = Date.parse(b.generatedAt);
+      if (!Number.isFinite(t)) continue;
+      if (range.ms != null && t < cutoff) continue;
+      inRange.push(b);
+    }
+    type TacticStat = {
+      tacticId: string;
+      tacticName: string;
+      count: number; // technique occurrences
+      briefs: Set<string>; // asset ids
+      techniques: Map<string, { name: string; matrix: "ics" | "enterprise"; count: number; url: string }>;
+    };
+    const tactics = new Map<string, TacticStat>();
+    let totalTechHits = 0;
+    for (const b of inRange) {
+      for (const a of b.attack ?? []) {
+        if (matrixFilter !== "all" && a.matrix !== matrixFilter) continue;
+        totalTechHits++;
+        const cur = tactics.get(a.tacticId) ?? {
+          tacticId: a.tacticId,
+          tacticName: a.tacticName,
+          count: 0,
+          briefs: new Set<string>(),
+          techniques: new Map(),
+        };
+        cur.count++;
+        cur.briefs.add(b.asset.id);
+        const tk = cur.techniques.get(a.techniqueId) ?? {
+          name: a.techniqueName,
+          matrix: a.matrix,
+          count: 0,
+          url: a.url,
+        };
+        tk.count++;
+        cur.techniques.set(a.techniqueId, tk);
+        tactics.set(a.tacticId, cur);
+      }
+    }
+    const sorted = Array.from(tactics.values()).sort((a, b) => b.count - a.count);
+    const max = sorted[0]?.count ?? 0;
+    return { rows: sorted, max, totalBriefs: inRange.length, totalTechHits };
+  }, [briefs, rangeKey, matrixFilter]);
+
+  return (
+    <div className="mt-6 rounded-lg border border-border bg-card p-4">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <h3 className="text-xs font-mono uppercase tracking-widest text-muted-foreground">
+          MITRE ATT&amp;CK Heatmap — Tactic Frequency
+        </h3>
+        <span className="font-mono text-[10px] text-muted-foreground">
+          {stats.totalBriefs} brief{stats.totalBriefs === 1 ? "" : "s"} · {stats.totalTechHits} technique hits
+        </span>
+        <div className="ml-auto flex items-center gap-1">
+          {(["all", "ics", "enterprise"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMatrixFilter(m)}
+              className={`rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${
+                matrixFilter === m
+                  ? "border-primary bg-primary/15 text-primary"
+                  : "border-border bg-background text-muted-foreground hover:bg-accent"
+              }`}
+            >
+              {m}
+            </button>
+          ))}
+          <span className="mx-1 text-border">|</span>
+          {RANGE_PRESETS.map((r) => (
+            <button
+              key={r.key}
+              onClick={() => setRangeKey(r.key)}
+              className={`rounded border px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${
+                rangeKey === r.key
+                  ? "border-primary bg-primary/15 text-primary"
+                  : "border-border bg-background text-muted-foreground hover:bg-accent"
+              }`}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {stats.rows.length === 0 ? (
+        <div className="rounded-md border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
+          No ATT&amp;CK techniques matched in this range. Analyze more assets or widen the window.
+        </div>
+      ) : (
+        <ul className="space-y-2">
+          {stats.rows.map((t) => {
+            const pct = stats.max ? (t.count / stats.max) * 100 : 0;
+            const top = Array.from(t.techniques.values())
+              .sort((a, b) => b.count - a.count)
+              .slice(0, 6);
+            const intensity = 0.15 + 0.65 * (t.count / stats.max);
+            return (
+              <li key={t.tacticId} className="rounded-md border border-border/60 bg-background/40 p-2">
+                <div className="flex items-baseline gap-2 text-xs">
+                  <span className="w-40 shrink-0 font-semibold text-foreground">
+                    {t.tacticName}
+                  </span>
+                  <span className="w-16 shrink-0 font-mono text-[10px] text-muted-foreground">
+                    {t.tacticId}
+                  </span>
+                  <div className="relative h-4 flex-1 overflow-hidden rounded bg-muted">
+                    <div
+                      className="h-full bg-destructive"
+                      style={{ width: `${pct}%`, opacity: intensity }}
+                    />
+                  </div>
+                  <span className="w-14 shrink-0 text-right font-mono tabular-nums text-foreground">
+                    {t.count}×
+                  </span>
+                  <span
+                    className="w-16 shrink-0 text-right font-mono text-[10px] text-muted-foreground"
+                    title={`Distinct assets contributing to this tactic`}
+                  >
+                    {t.briefs.size} asset{t.briefs.size === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <div className="mt-1.5 flex flex-wrap gap-1 pl-40">
+                  {top.map((tk) => {
+                    const [id, ] = Array.from(t.techniques.entries()).find(([, v]) => v === tk) ?? [];
+                    return (
+                      <a
+                        key={id}
+                        href={tk.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={`inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[10px] hover:bg-accent ${
+                          tk.matrix === "ics"
+                            ? "border-chart-4/40 bg-chart-4/10 text-chart-4"
+                            : "border-primary/40 bg-primary/10 text-primary"
+                        }`}
+                        title={`${tk.name} — ${tk.count} hit${tk.count === 1 ? "" : "s"}`}
+                      >
+                        <span className="font-semibold">{id}</span>
+                        <span className="text-foreground/80">×{tk.count}</span>
+                      </a>
+                    );
+                  })}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function AttackPanel({
   attack,
 }: {
