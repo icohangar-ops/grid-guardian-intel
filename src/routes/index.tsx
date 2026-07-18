@@ -5,8 +5,10 @@ import { useState } from "react";
 import {
   listExposedAssets,
   analyzeAsset,
+  getReconToolkit,
   type ThreatBrief,
   type OsintAsset,
+  type ReconToolkit,
 } from "@/lib/sentinel.functions";
 
 const assetsQuery = (query?: string, cursor?: string) =>
@@ -49,8 +51,10 @@ function SentinelDashboard() {
     assetsQuery(activeQuery, currentCursor),
   );
   const analyzeFn = useServerFn(analyzeAsset);
+  const reconFn = useServerFn(getReconToolkit);
   // Briefs are keyed by asset.id (ip:port), so mapping survives across pages.
   const [briefs, setBriefs] = useState<Record<string, ThreatBrief>>({});
+  const [toolkits, setToolkits] = useState<Record<string, ReconToolkit>>({});
   const [selected, setSelected] = useState<string | null>(null);
 
   const mutation = useMutation({
@@ -58,6 +62,13 @@ function SentinelDashboard() {
     onSuccess: (brief) => {
       setBriefs((prev) => ({ ...prev, [brief.asset.id]: brief }));
       setSelected(brief.asset.id);
+    },
+  });
+
+  const reconMutation = useMutation({
+    mutationFn: (asset: OsintAsset) => reconFn({ data: { asset } }),
+    onSuccess: (kit) => {
+      setToolkits((prev) => ({ ...prev, [kit.asset.id]: kit }));
     },
   });
 
@@ -194,8 +205,112 @@ function SentinelDashboard() {
             brief={selected ? briefs[selected] : undefined}
             error={mutation.error?.message}
           />
+          <h2 className="mb-3 mt-6 text-xs font-mono uppercase tracking-widest text-muted-foreground">
+            Recon Toolkit · OSINT Framework
+          </h2>
+          <ToolkitPanel
+            asset={selected ? feed.assets.find((a) => a.id === selected) : undefined}
+            toolkit={selected ? toolkits[selected] : undefined}
+            loading={reconMutation.isPending}
+            error={reconMutation.error?.message}
+            onLoad={(asset: OsintAsset) => reconMutation.mutate(asset)}
+          />
         </aside>
       </main>
+    </div>
+  );
+}
+
+function ToolkitPanel({
+  asset,
+  toolkit,
+  loading,
+  error,
+  onLoad,
+}: {
+  asset?: OsintAsset;
+  toolkit?: ReconToolkit;
+  loading: boolean;
+  error?: string;
+  onLoad: (asset: OsintAsset) => void;
+}) {
+  if (!asset) {
+    return (
+      <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+        Select an asset to load matched investigation tools from the OSINT Framework.
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+        {error}
+      </div>
+    );
+  }
+  if (!toolkit) {
+    return (
+      <div className="rounded-lg border border-border bg-card p-4">
+        <p className="mb-3 text-sm text-muted-foreground">
+          Load curated OSINT Framework tools scoped to{" "}
+          <span className="font-mono text-foreground">{asset.sector}</span> recon
+          on <span className="font-mono text-foreground">{asset.ip}</span>.
+        </p>
+        <button
+          onClick={() => onLoad(asset)}
+          disabled={loading}
+          className="rounded-md border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-50"
+        >
+          {loading ? "Loading toolkit…" : "Load Recon Toolkit"}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span className="font-mono">
+          {toolkit.groups.length} categories · {toolkit.total} tools indexed
+        </span>
+        <a
+          href="https://github.com/lockfale/osint-framework"
+          target="_blank"
+          rel="noreferrer"
+          className="underline-offset-2 hover:underline"
+        >
+          source
+        </a>
+      </div>
+      <div className="max-h-[520px] space-y-3 overflow-y-auto pr-1">
+        {toolkit.groups.map((g) => (
+          <details key={g.category} className="rounded-md border border-border/60">
+            <summary className="cursor-pointer select-none px-3 py-2 text-xs font-mono uppercase tracking-wider text-muted-foreground hover:bg-accent/30">
+              {g.category}{" "}
+              <span className="text-foreground">({g.tools.length})</span>
+            </summary>
+            <ul className="space-y-1 border-t border-border/60 p-2 text-sm">
+              {g.tools.slice(0, 40).map((t) => (
+                <li key={t.url} className="flex items-baseline justify-between gap-2">
+                  <a
+                    href={t.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="truncate text-primary underline-offset-2 hover:underline"
+                    title={t.description}
+                  >
+                    {t.name}
+                  </a>
+                  <span className="shrink-0 font-mono text-[10px] uppercase text-muted-foreground">
+                    {t.api ? "api " : ""}
+                    {t.registration ? "auth " : ""}
+                    {t.pricing && t.pricing !== "free" ? t.pricing : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        ))}
+      </div>
     </div>
   );
 }

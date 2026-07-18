@@ -231,3 +231,137 @@ export const analyzeAsset = createServerFn({ method: "POST" })
       generatedAt: new Date().toISOString(),
     };
   });
+
+// ─────────────────────────────────────────────────────────────
+// OSINT Framework recon toolkit
+// Sources https://github.com/lockfale/osint-framework — a curated
+// hierarchical registry of investigation tools. We fetch the JSON,
+// flatten it, and surface entries relevant to infrastructure recon.
+// ─────────────────────────────────────────────────────────────
+
+export type ReconTool = {
+  name: string;
+  url: string;
+  category: string;
+  description?: string;
+  pricing?: string;
+  api?: boolean;
+  registration?: boolean;
+  deprecated?: boolean;
+};
+
+type ArfNode = {
+  name: string;
+  type: "folder" | "url";
+  url?: string;
+  description?: string;
+  pricing?: string;
+  api?: boolean;
+  registration?: boolean;
+  deprecated?: boolean;
+  children?: ArfNode[];
+};
+
+const ARF_URL =
+  "https://raw.githubusercontent.com/lockfale/OSINT-Framework/master/public/arf.json";
+
+// Categories in OSINT Framework relevant to cyber-physical / infra recon.
+// Matched against the top-level branch name.
+const INFRA_BRANCHES = new Set([
+  "IP & MAC Address",
+  "Domain Name",
+  "Malicious File Analysis",
+  "Compliance & Risk Intelligence",
+  "Dark Web",
+  "Search Engines",
+  "Tools",
+  "Archives",
+]);
+
+let arfCache: { at: number; tools: ReconTool[] } | null = null;
+const ARF_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+
+function flatten(node: ArfNode, trail: string[], out: ReconTool[]) {
+  if (node.type === "folder") {
+    for (const c of node.children ?? []) flatten(c, [...trail, node.name], out);
+    return;
+  }
+  if (!node.url) return;
+  // trail = [root, branch, ...subfolders]; keep "Branch > Subfolder".
+  const branch = trail[1];
+  if (!branch || !INFRA_BRANCHES.has(branch)) return;
+  const category = trail.slice(1).join(" > ");
+  out.push({
+    name: node.name,
+    url: node.url,
+    category,
+    description: node.description,
+    pricing: node.pricing,
+    api: node.api,
+    registration: node.registration,
+    deprecated: node.deprecated,
+  });
+}
+
+async function loadArf(): Promise<ReconTool[]> {
+  if (arfCache && Date.now() - arfCache.at < ARF_TTL_MS) return arfCache.tools;
+  const res = await fetch(ARF_URL);
+  if (!res.ok) throw new Error(`OSINT Framework fetch failed [${res.status}]`);
+  const root = (await res.json()) as ArfNode;
+  const tools: ReconTool[] = [];
+  flatten(root, [], tools);
+  arfCache = { at: Date.now(), tools };
+  return tools;
+}
+
+export type ReconToolkit = {
+  asset: OsintAsset;
+  groups: { category: string; tools: ReconTool[] }[];
+  total: number;
+};
+
+// Category priorities per asset context.
+const SECTOR_CATEGORY_BOOST: Record<string, string[]> = {
+  "Industrial Control": ["IP & MAC Address", "Tools", "Malicious File Analysis"],
+  Energy: ["IP & MAC Address", "Compliance & Risk Intelligence", "Tools"],
+  "Building Automation": ["IP & MAC Address", "Tools"],
+  Infrastructure: ["IP & MAC Address", "Domain Name", "Tools"],
+};
+
+export const getReconToolkit = createServerFn({ method: "POST" })
+  .inputValidator((input: { asset: OsintAsset }) => input)
+  .handler(async ({ data }): Promise<ReconToolkit> => {
+    const asset = data.asset;
+    const all = await loadArf();
+    const active = all.filter((t) => !t.deprecated);
+
+    const boosted = new Set(
+      SECTOR_CATEGORY_BOOST[asset.sector] ?? [
+        "IP & MAC Address",
+        "Domain Name",
+        "Tools",
+      ],
+    );
+
+    // Group by category, prioritized branches first.
+    const byCat = new Map<string, ReconTool[]>();
+    for (const t of active) {
+      const arr = byCat.get(t.category) ?? [];
+      arr.push(t);
+      byCat.set(t.category, arr);
+    }
+
+    const groups = Array.from(byCat.entries())
+      .map(([category, tools]) => ({
+        category,
+        tools: tools.sort((a, b) => a.name.localeCompare(b.name)),
+      }))
+      .sort((a, b) => {
+        const ab = boosted.has(a.category.split(" > ")[0]) ? 0 : 1;
+        const bb = boosted.has(b.category.split(" > ")[0]) ? 0 : 1;
+        if (ab !== bb) return ab - bb;
+        return a.category.localeCompare(b.category);
+      });
+
+    return { asset, groups, total: active.length };
+  });
