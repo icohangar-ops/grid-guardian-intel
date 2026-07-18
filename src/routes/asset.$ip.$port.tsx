@@ -287,6 +287,8 @@ function SharedEvidenceDialogInner({
     () => new Set<Band>(["high", "medium", "low"]),
   );
   const [rangeMs, setRangeMs] = useState<number | null>(null);
+  type SortMode = "type" | "confidence" | "recent";
+  const [sortMode, setSortMode] = useState<SortMode>("type");
   const kindOf = (k: string): SrcType =>
     k.startsWith("actor:") ? "actor"
     : k.toLowerCase() === technique.techniqueId.toLowerCase() ? "id"
@@ -310,6 +312,36 @@ function SharedEvidenceDialogInner({
           typeSet.has(kindOf(s.keyword)) &&
           (matchStr(s.snippet) || matchStr(s.keyword.replace(/^actor:/, ""))),
       );
+  const summaryLc = (brief?.summary ?? "").toLowerCase();
+  const sigWeight = (k: string) => {
+    const kind = kindOf(k);
+    return kind === "id" ? 3 : kind === "actor" ? 2 : 1;
+  };
+  const sigCount = (k: string) => {
+    const needle = (k.startsWith("actor:") ? k.slice(6) : k).toLowerCase();
+    if (!needle) return 0;
+    let c = 0, i = 0;
+    while ((i = summaryLc.indexOf(needle, i)) !== -1) { c++; i += needle.length; }
+    return c;
+  };
+  const sigLast = (k: string) => {
+    const needle = (k.startsWith("actor:") ? k.slice(6) : k).toLowerCase();
+    return needle ? summaryLc.lastIndexOf(needle) : -1;
+  };
+  const signalCmp = (a: string, b: string) => {
+    if (sortMode === "confidence") return sigWeight(b) - sigWeight(a) || sigCount(b) - sigCount(a);
+    if (sortMode === "recent") return sigLast(b) - sigLast(a) || sigWeight(b) - sigWeight(a);
+    return 0;
+  };
+  const snippetPos = (s: { snippet: string }) =>
+    summaryLc.indexOf(s.snippet.slice(0, 40).toLowerCase().replace(/^…\s*/, ""));
+  const snippetCmp = (a: { keyword: string; snippet: string }, b: { keyword: string; snippet: string }) => {
+    if (sortMode === "confidence") return sigWeight(b.keyword) - sigWeight(a.keyword);
+    if (sortMode === "recent") return snippetPos(b) - snippetPos(a);
+    return 0;
+  };
+  const orderedMatched = sortMode === "type" ? visibleMatched : [...visibleMatched].sort(signalCmp);
+  const orderedSnippets = sortMode === "type" ? visibleSnippets : [...visibleSnippets].sort(snippetCmp);
   const anyFacetActive = typeSet.size < 3 || bandSet.size < 3 || rangeMs !== null;
   const toggle = <T,>(set: Set<T>, val: T, setter: (s: Set<T>) => void) => {
     const next = new Set(set);
@@ -370,6 +402,16 @@ function SharedEvidenceDialogInner({
                   Clear
                 </button>
               )}
+              <select
+                value={sortMode}
+                onChange={(e) => setSortMode(e.target.value as SortMode)}
+                className="h-7 rounded border border-border bg-background px-1.5 font-mono text-[10px] uppercase tracking-widest outline-none focus:border-primary"
+                title="Sort matched signals & snippets"
+              >
+                <option value="type">Sort: Source type</option>
+                <option value="confidence">Sort: Highest confidence</option>
+                <option value="recent">Sort: Newest in brief</option>
+              </select>
             </div>
             <div className="mt-2 space-y-1.5">
               <SharedFacetRow
@@ -444,7 +486,7 @@ function SharedEvidenceDialogInner({
               </div>
             ) : (
             <div className="flex flex-wrap gap-1">
-              {visibleMatched.map((k) => (
+              {orderedMatched.map((k) => (
                 <span key={k} className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[10px]">
                   {k.startsWith("actor:") ? `actor: ${k.slice(6)}` : `“${k}”`}
                 </span>
@@ -467,7 +509,7 @@ function SharedEvidenceDialogInner({
               </div>
             ) : (
               <ul className="space-y-2">
-                {visibleSnippets.map((s, i) => (
+                {orderedSnippets.map((s, i) => (
                   <li key={i} className="rounded border border-border bg-background/60 p-2 text-xs leading-relaxed">
                     <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
                       matched: “{s.keyword.replace(/^actor:/, "actor:")}”
