@@ -568,6 +568,7 @@ function SentinelDashboard() {
           </div>
 
           <GeoHeatmap counts={stateCounts} />
+          <AttackHeatmap briefs={briefs} />
         </section>
 
         <aside>
