@@ -579,6 +579,10 @@ function SentinelDashboard() {
             asset={selected ? feed.assets.find((a) => a.id === selected) : undefined}
             error={mutation.error?.message}
             kev={selected ? kev[feed.assets.find((a) => a.id === selected)?.protocol ?? ""] : undefined}
+            audit={audit}
+            delta={delta}
+            deltaQuery={activeQuery}
+            watched={selected ? Boolean(watch[selected]) : false}
           />
           <NotifierPanel webhook={webhook} setWebhook={(w) => { saveWebhook(w); setWebhook(w); }} />
           <WatchlistPanel watch={watch} briefs={briefs} onOpen={(id) => setSelected(id)} />
