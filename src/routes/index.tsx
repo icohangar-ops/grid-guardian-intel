@@ -128,6 +128,24 @@ function SentinelDashboard() {
   const [bulkStatus, setBulkStatus] = useState<Record<string, BulkState>>({});
   const bulkRunning = useRef(false);
 
+  // Bulk retry configuration (persisted).
+  const [retryConfig, setRetryConfig] = useState<{ attempts: number; baseMs: number }>(() => {
+    if (typeof window === "undefined") return { attempts: 4, baseMs: 800 };
+    try {
+      const raw = localStorage.getItem("sentinel:bulk-retry");
+      if (raw) {
+        const p = JSON.parse(raw);
+        const attempts = Math.max(1, Math.min(10, Number(p.attempts) || 4));
+        const baseMs = Math.max(100, Math.min(10000, Number(p.baseMs) || 800));
+        return { attempts, baseMs };
+      }
+    } catch { /* ignore */ }
+    return { attempts: 4, baseMs: 800 };
+  });
+  useEffect(() => {
+    try { localStorage.setItem("sentinel:bulk-retry", JSON.stringify(retryConfig)); } catch { /* ignore */ }
+  }, [retryConfig]);
+
   // KEV enrichment: proto → matches[]
   const protoList = useMemo(
     () => Array.from(new Set(feed.assets.map((a) => a.protocol))),
@@ -253,8 +271,8 @@ function SentinelDashboard() {
     setBulkStatus(
       Object.fromEntries(queue.map((a) => [a.id, { status: "queued" } as BulkState])),
     );
-    const MAX_ATTEMPTS = 4;
-    const BASE_MS = 800;
+    const MAX_ATTEMPTS = retryConfig.attempts;
+    const BASE_MS = retryConfig.baseMs;
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const errMsg = (e: unknown) => {
       if (e instanceof Error) return e.message || e.name;
@@ -457,6 +475,8 @@ function SentinelDashboard() {
             bulkPending={Object.values(bulkStatus).some(
               (s) => s.status === "queued" || s.status === "running" || s.status === "retrying",
             )}
+            retryConfig={retryConfig}
+            setRetryConfig={setRetryConfig}
           />
 
           <div className="overflow-hidden rounded-lg border border-border">
@@ -615,8 +635,12 @@ function ToolbarPanel(props: {
   onCsv: () => void;
   onStix: () => void;
   bulkPending: boolean;
+  retryConfig: { attempts: number; baseMs: number };
+  setRetryConfig: (c: { attempts: number; baseMs: number }) => void;
 }) {
   const [showCols, setShowCols] = useState(false);
+  const rc = props.retryConfig;
+  const maxDelaySec = Math.round((rc.baseMs * 2 ** (rc.attempts - 2)) / 100) / 10;
   return (
     <div className="mb-3 space-y-2 rounded-md border border-border bg-card p-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -664,6 +688,48 @@ function ToolbarPanel(props: {
         >
           {props.bulkPending ? "Analyzing visible…" : "Bulk analyze visible"}
         </button>
+        <div
+          className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-2 py-1 font-mono text-[11px] text-muted-foreground"
+          title={`Per row: up to ${rc.attempts} attempts with exponential backoff starting at ${rc.baseMs}ms (max wait before last retry ≈ ${maxDelaySec}s).`}
+        >
+          <label className="flex items-center gap-1">
+            <span className="uppercase tracking-wider">Retries</span>
+            <input
+              type="number"
+              min={1}
+              max={10}
+              value={rc.attempts}
+              disabled={props.bulkPending}
+              onChange={(e) =>
+                props.setRetryConfig({
+                  ...rc,
+                  attempts: Math.max(1, Math.min(10, Number(e.target.value) || 1)),
+                })
+              }
+              className="w-12 rounded border border-border bg-card px-1 py-0.5 text-right text-foreground disabled:opacity-50"
+            />
+          </label>
+          <span className="text-border">·</span>
+          <label className="flex items-center gap-1">
+            <span className="uppercase tracking-wider">Backoff</span>
+            <input
+              type="number"
+              min={100}
+              max={10000}
+              step={100}
+              value={rc.baseMs}
+              disabled={props.bulkPending}
+              onChange={(e) =>
+                props.setRetryConfig({
+                  ...rc,
+                  baseMs: Math.max(100, Math.min(10000, Number(e.target.value) || 100)),
+                })
+              }
+              className="w-16 rounded border border-border bg-card px-1 py-0.5 text-right text-foreground disabled:opacity-50"
+            />
+            <span>ms</span>
+          </label>
+        </div>
         <button
           onClick={props.onRePoll}
           className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-3 py-1.5 hover:bg-accent"
