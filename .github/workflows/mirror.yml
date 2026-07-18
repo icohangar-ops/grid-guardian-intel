@@ -1,4 +1,6 @@
 name: Mirror to Cubiczan (GitHub + Codeberg)
+# Mirrors every branch + tag to Cubiczan/GitHub and Cubiczan/Codeberg.
+# Trigger: any push to the primary repo, or manual via workflow_dispatch.
 
 on:
   push:
