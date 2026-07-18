@@ -297,11 +297,26 @@ export type EvidenceExport = {
   filenameBase: string;
   json: string;
   markdown: string;
+  signalsCsv: string;
   title: string;
 };
 
 function safeSlug(s: string): string {
   return s.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase() || "evidence";
+}
+
+function csvCell(v: unknown): string {
+  const s = v == null ? "" : String(v);
+  return `"${s.replace(/"/g, '""')}"`;
+}
+
+export function downloadCsv(filename: string, csv: string) {
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export function buildTechniqueEvidence(
@@ -420,10 +435,65 @@ export function buildTechniqueEvidence(
   const assetSlug = brief ? safeSlug(brief.asset.id) : "no-asset";
   const filenameBase = `attack-evidence_${technique.techniqueId}_${assetSlug}_${stamp}`;
 
+  // ─── Matched signals CSV (one row per ID / keyword / actor) ──
+  const briefTs = brief?.generatedAt ?? "";
+  const snippetsByKeyword = new Map<string, string[]>();
+  for (const s of snippets) {
+    const key = s.keyword.toLowerCase();
+    const arr = snippetsByKeyword.get(key) ?? [];
+    arr.push(s.snippet.replace(/\s+/g, " ").trim());
+    snippetsByKeyword.set(key, arr);
+  }
+  const csvRows: string[][] = [
+    [
+      "signal_type",
+      "value",
+      "technique_id",
+      "technique_name",
+      "tactic_id",
+      "tactic_name",
+      "matrix",
+      "confidence_score",
+      "confidence_band",
+      "asset_id",
+      "asset_org",
+      "asset_location",
+      "brief_generated_at",
+      "exported_at",
+      "snippet",
+    ],
+  ];
+  const pushSignal = (type: string, value: string, lookup: string) => {
+    const snips = snippetsByKeyword.get(lookup.toLowerCase()) ?? [];
+    const snippet = snips.join(" | ");
+    csvRows.push([
+      type,
+      value,
+      technique.techniqueId,
+      technique.techniqueName,
+      technique.tacticId,
+      technique.tacticName,
+      technique.matrix,
+      String(conf.score),
+      conf.band,
+      brief?.asset.id ?? "",
+      brief?.asset.org ?? "",
+      brief?.asset.location ?? "",
+      briefTs,
+      generatedAt,
+      snippet,
+    ]);
+  };
+  if (idHit) pushSignal("id_reference", technique.techniqueId, technique.techniqueId);
+  for (const k of keywords) pushSignal("keyword", k, k);
+  for (const a of actors) pushSignal("actor", a, `actor:${a}`);
+  const signalsCsv = csvRows.map((r) => r.map(csvCell).join(",")).join("\n");
+
   return {
     filenameBase,
     json: JSON.stringify(jsonObj, null, 2),
     markdown: lines.join("\n"),
+    signalsCsv,
     title,
   };
 }
