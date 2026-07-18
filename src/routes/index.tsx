@@ -1385,6 +1385,64 @@ function AttackEvidenceDialog({
                 {visibleSnippets.length === 1 ? "" : "s"}
               </div>
             )}
+            <div className="mt-2 space-y-1.5">
+              <FacetRow
+                label="Source type"
+                options={[
+                  { id: "id", label: "ID ref" },
+                  { id: "keyword", label: "Keyword" },
+                  { id: "actor", label: "Actor" },
+                ]}
+                selected={typeSet}
+                onToggle={(v) => toggle(typeSet, v as SrcType, setTypeSet)}
+              />
+              <FacetRow
+                label="Confidence"
+                options={[
+                  { id: "high", label: "High" },
+                  { id: "medium", label: "Med" },
+                  { id: "low", label: "Low" },
+                ]}
+                selected={bandSet}
+                onToggle={(v) => toggle(bandSet, v as Band, setBandSet)}
+                hint={`Technique band: ${conf.band.toUpperCase()}`}
+              />
+              <FacetRow
+                label="Age"
+                options={[
+                  { id: "3600000", label: "1h" },
+                  { id: "86400000", label: "24h" },
+                  { id: "604800000", label: "7d" },
+                  { id: "2592000000", label: "30d" },
+                  { id: "all", label: "All" },
+                ]}
+                selected={new Set([rangeMs === null ? "all" : String(rangeMs)])}
+                onToggle={(v) => setRangeMs(v === "all" ? null : Number(v))}
+                exclusive
+                hint={
+                  briefAgeMs !== null ? `Brief age: ${formatRelative(brief!.generatedAt)}` : undefined
+                }
+              />
+              {anyFacetActive && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTypeSet(new Set(["id", "keyword", "actor"]));
+                    setBandSet(new Set(["high", "medium", "low"]));
+                    setRangeMs(null);
+                  }}
+                  className="rounded border border-border bg-background px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest hover:bg-accent"
+                >
+                  Reset facets
+                </button>
+              )}
+              {facetGated && (
+                <div className="rounded border border-dashed border-border/70 bg-muted/30 px-2 py-1 font-mono text-[10px] text-muted-foreground">
+                  {bandGated && `Hidden by confidence facet (technique band ${conf.band.toUpperCase()}). `}
+                  {rangeGated && `Hidden by age facet (brief older than selected window).`}
+                </div>
+              )}
+            </div>
           </div>
 
           <section>
