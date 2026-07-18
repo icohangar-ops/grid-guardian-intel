@@ -2385,6 +2385,182 @@ function AssetRow({
   );
 }
 
+function ProximityPanel({ asset }: { asset: OsintAsset }) {
+  const runFeed = useServerFn(getProximityFeed);
+  const [radiusKm, setRadiusKm] = useState<number>(300);
+  const q = useQuery<ProximityFeed>({
+    queryKey: ["proximity", asset.id, radiusKm],
+    queryFn: () =>
+      runFeed({
+        data: {
+          lat: asset.lat,
+          lon: asset.lon,
+          radiusKm,
+          location: asset.location,
+          includeNews: true,
+        },
+      }),
+    staleTime: 5 * 60 * 1000,
+  });
+  const feed = q.data;
+  const sevBadge = (s: GeoEvent["severity"]) => {
+    const map: Record<GeoEvent["severity"], string> = {
+      extreme: "border-destructive/70 bg-destructive/20 text-destructive",
+      severe: "border-destructive/60 bg-destructive/15 text-destructive",
+      moderate: "border-chart-3/60 bg-chart-3/10 text-chart-3",
+      minor: "border-border bg-muted/40 text-foreground",
+      info: "border-border bg-muted/30 text-muted-foreground",
+    };
+    return map[s];
+  };
+  const compass = (deg?: number) => {
+    if (typeof deg !== "number") return "";
+    const dirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+    return dirs[Math.round(deg / 45) % 8];
+  };
+  return (
+    <div className="rounded-md border border-border bg-background/40 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-xs uppercase tracking-widest text-muted-foreground">
+          Proximity Signals
+        </div>
+        <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+          <label className="flex items-center gap-1">
+            Radius
+            <select
+              value={radiusKm}
+              onChange={(e) => setRadiusKm(Number(e.target.value))}
+              className="h-6 rounded border border-border bg-background px-1 text-[10px]"
+            >
+              <option value={100}>100 km</option>
+              <option value={300}>300 km</option>
+              <option value={500}>500 km</option>
+              <option value={1000}>1000 km</option>
+            </select>
+          </label>
+          <button
+            type="button"
+            onClick={() => q.refetch()}
+            className="rounded border border-border bg-background px-2 py-0.5 hover:bg-accent"
+          >
+            {q.isFetching ? "…" : "Refresh"}
+          </button>
+        </div>
+      </div>
+      {typeof asset.lat !== "number" || typeof asset.lon !== "number" ? (
+        <div className="mt-2 rounded border border-dashed border-border p-2 text-[11px] text-muted-foreground">
+          Asset has no geo-coordinates from Censys — proximity distance
+          disabled. Showing recent global feeds and Tavily sweep by named
+          location.
+        </div>
+      ) : null}
+      {q.isLoading && !feed ? (
+        <div className="mt-2 text-[11px] text-muted-foreground">Fetching GDACS · USGS · NOAA · Tavily…</div>
+      ) : null}
+      {feed && (
+        <div className="mt-3 space-y-3">
+          <div>
+            <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+              Geo events ({feed.events.length})
+            </div>
+            {feed.events.length === 0 ? (
+              <div className="rounded border border-dashed border-border p-2 text-[11px] text-muted-foreground">
+                No active events within {feed.radiusKm} km.
+              </div>
+            ) : (
+              <ul className="space-y-1.5">
+                {feed.events.slice(0, 8).map((e) => (
+                  <li
+                    key={e.id}
+                    className="flex items-start justify-between gap-2 rounded border border-border/70 bg-background/60 p-2 text-[11px]"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span
+                          className={`rounded border px-1 py-[1px] font-mono uppercase tracking-widest ${sevBadge(e.severity)}`}
+                        >
+                          {e.severity}
+                        </span>
+                        <span className="rounded border border-border bg-muted/40 px-1 py-[1px] font-mono uppercase tracking-widest text-muted-foreground">
+                          {e.source}
+                        </span>
+                        <span className="rounded border border-border bg-muted/30 px-1 py-[1px] font-mono uppercase tracking-widest text-muted-foreground">
+                          {e.type}
+                        </span>
+                      </div>
+                      <div className="mt-1 truncate">
+                        {e.url ? (
+                          <a
+                            href={e.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary hover:underline"
+                            title={e.title}
+                          >
+                            {e.title}
+                          </a>
+                        ) : (
+                          <span title={e.title}>{e.title}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right font-mono text-[10px] text-muted-foreground">
+                      {typeof e.distanceKm === "number" && (
+                        <div>{Math.round(e.distanceKm)} km {compass(e.bearing)}</div>
+                      )}
+                      {e.startedAt && (
+                        <div>{new Date(e.startedAt).toLocaleDateString()}</div>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div>
+            <div className="mb-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+              Radius news sweep · Tavily ({feed.news.length})
+            </div>
+            {feed.news.length === 0 ? (
+              <div className="rounded border border-dashed border-border p-2 text-[11px] text-muted-foreground">
+                No relevant news items returned.
+              </div>
+            ) : (
+              <ul className="space-y-1">
+                {feed.news.slice(0, 6).map((n) => (
+                  <li key={n.url} className="text-[11px] leading-snug">
+                    <a
+                      href={n.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      {n.title}
+                    </a>
+                    {n.publishedAt && (
+                      <span className="ml-1 font-mono text-[10px] text-muted-foreground">
+                        · {new Date(n.publishedAt).toLocaleDateString()}
+                      </span>
+                    )}
+                    {n.snippet && (
+                      <div className="line-clamp-2 text-muted-foreground">{n.snippet}</div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          {feed.errors.length > 0 && (
+            <div className="rounded border border-dashed border-border/70 bg-muted/20 p-2 font-mono text-[10px] text-muted-foreground">
+              {feed.errors.join(" · ")}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BriefPanel({
   brief, error, asset, kev, audit, delta, deltaQuery, watched,
 }: {
