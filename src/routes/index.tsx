@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { queryOptions, useSuspenseQuery, useMutation } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Star } from "lucide-react";
 import {
   listExposedAssets,
   analyzeAsset,
@@ -239,13 +240,42 @@ function ToolkitPanel({
     free: boolean;
     api: boolean;
     noAuth: boolean;
-  }>({ free: false, api: false, noAuth: false });
+    favorites: boolean;
+  }>({ free: false, api: false, noAuth: false, favorites: false });
+
+  // Favorites: { [assetId]: string[] of tool URLs }, persisted to localStorage.
+  const [favMap, setFavMap] = useState<Record<string, string[]>>({});
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("sentinel:favs");
+      if (raw) setFavMap(JSON.parse(raw));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  const favs = new Set(asset ? favMap[asset.id] ?? [] : []);
+  const toggleFav = (url: string) => {
+    if (!asset) return;
+    setFavMap((prev) => {
+      const cur = new Set(prev[asset.id] ?? []);
+      if (cur.has(url)) cur.delete(url);
+      else cur.add(url);
+      const next = { ...prev, [asset.id]: Array.from(cur) };
+      try {
+        localStorage.setItem("sentinel:favs", JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
 
   const filtered = useMemo(() => {
     if (!toolkit) return [];
     const q = search.trim().toLowerCase();
     const groups = toolkit.groups.map((g) => {
       const tools = g.tools.filter((t) => {
+        if (tags.favorites && !favs.has(t.url)) return false;
         if (tags.free && t.pricing && t.pricing !== "free") return false;
         if (tags.api && !t.api) return false;
         if (tags.noAuth && t.registration) return false;
@@ -259,7 +289,19 @@ function ToolkitPanel({
       return { category: g.category, tools };
     });
     return groups.filter((g) => g.tools.length > 0);
-  }, [toolkit, search, tags]);
+  }, [toolkit, search, tags, favMap, asset]);
+
+  const favTools = useMemo(() => {
+    if (!toolkit) return [];
+    const list: { name: string; url: string; category: string }[] = [];
+    for (const g of toolkit.groups) {
+      for (const t of g.tools) {
+        if (favs.has(t.url))
+          list.push({ name: t.name, url: t.url, category: g.category });
+      }
+    }
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, [toolkit, favMap, asset]);
 
   const matchCount = filtered.reduce((n, g) => n + g.tools.length, 0);
 
@@ -319,7 +361,8 @@ function ToolkitPanel({
     <div className="space-y-3 rounded-lg border border-border bg-card p-4">
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span className="font-mono">
-          {filtered.length} categories · {matchCount} / {toolkit.total} tools
+          {filtered.length} categories · {matchCount} / {toolkit.total} tools ·{" "}
+          <span className="text-chart-4">{favTools.length} starred</span>
         </span>
         <a
           href="https://github.com/lockfale/osint-framework"
@@ -330,6 +373,37 @@ function ToolkitPanel({
           source
         </a>
       </div>
+      {favTools.length > 0 && !tags.favorites && (
+        <div className="rounded-md border border-chart-4/40 bg-chart-4/5 p-2">
+          <div className="mb-1 text-[10px] font-mono uppercase tracking-wider text-chart-4">
+            ★ Starred for this asset
+          </div>
+          <ul className="space-y-1 text-sm">
+            {favTools.map((t) => (
+              <li
+                key={t.url}
+                className="flex items-baseline justify-between gap-2"
+              >
+                <a
+                  href={t.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="truncate text-primary underline-offset-2 hover:underline"
+                >
+                  {t.name}
+                </a>
+                <button
+                  onClick={() => toggleFav(t.url)}
+                  className="shrink-0 text-chart-4 hover:text-foreground"
+                  aria-label="Unstar"
+                >
+                  <Star size={12} fill="currentColor" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="space-y-2">
         <input
           value={search}
@@ -338,6 +412,11 @@ function ToolkitPanel({
           className="w-full rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs"
         />
         <div className="flex flex-wrap items-center gap-1.5">
+          <TagChip
+            active={tags.favorites}
+            onClick={() => setTags((t) => ({ ...t, favorites: !t.favorites }))}
+            label={`★ favorites (${favTools.length})`}
+          />
           <TagChip
             active={tags.free}
             onClick={() => setTags((t) => ({ ...t, free: !t.free }))}
@@ -353,11 +432,11 @@ function ToolkitPanel({
             onClick={() => setTags((t) => ({ ...t, noAuth: !t.noAuth }))}
             label="no signup"
           />
-          {(search || tags.free || tags.api || tags.noAuth) && (
+          {(search || tags.free || tags.api || tags.noAuth || tags.favorites) && (
             <button
               onClick={() => {
                 setSearch("");
-                setTags({ free: false, api: false, noAuth: false });
+                setTags({ free: false, api: false, noAuth: false, favorites: false });
               }}
               className="ml-auto text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground"
             >
@@ -384,12 +463,23 @@ function ToolkitPanel({
             </summary>
             <ul className="space-y-1 border-t border-border/60 p-2 text-sm">
               {g.tools.slice(0, 40).map((t) => (
-                <li key={t.url} className="flex items-baseline justify-between gap-2">
+                <li key={t.url} className="flex items-baseline gap-2">
+                  <button
+                    onClick={() => toggleFav(t.url)}
+                    className={`shrink-0 transition-colors ${
+                      favs.has(t.url)
+                        ? "text-chart-4"
+                        : "text-muted-foreground/50 hover:text-chart-4"
+                    }`}
+                    aria-label={favs.has(t.url) ? "Unstar" : "Star"}
+                  >
+                    <Star size={12} fill={favs.has(t.url) ? "currentColor" : "none"} />
+                  </button>
                   <a
                     href={t.url}
                     target="_blank"
                     rel="noreferrer"
-                    className="truncate text-primary underline-offset-2 hover:underline"
+                    className="flex-1 truncate text-primary underline-offset-2 hover:underline"
                     title={t.description}
                   >
                     {t.name}
