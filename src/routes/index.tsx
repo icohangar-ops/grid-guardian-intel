@@ -635,8 +635,12 @@ function ToolbarPanel(props: {
   onCsv: () => void;
   onStix: () => void;
   bulkPending: boolean;
+  retryConfig: { attempts: number; baseMs: number };
+  setRetryConfig: (c: { attempts: number; baseMs: number }) => void;
 }) {
   const [showCols, setShowCols] = useState(false);
+  const rc = props.retryConfig;
+  const maxDelaySec = Math.round((rc.baseMs * 2 ** (rc.attempts - 2)) / 100) / 10;
   return (
     <div className="mb-3 space-y-2 rounded-md border border-border bg-card p-3">
       <div className="flex flex-wrap items-center gap-2">
