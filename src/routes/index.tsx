@@ -1468,10 +1468,11 @@ function EvidenceExportButtons({
   technique: AttackMapping;
   brief: ThreatBrief | undefined;
 }) {
-  const doExport = (kind: "json" | "pdf" | "md") => {
+  const doExport = (kind: "json" | "pdf" | "md" | "csv") => {
     const ev = buildTechniqueEvidence(technique, brief);
     if (kind === "json") downloadJson(`${ev.filenameBase}.json`, ev.json);
     else if (kind === "md") downloadMarkdown(`${ev.filenameBase}.md`, ev.markdown);
+    else if (kind === "csv") downloadCsv(`${ev.filenameBase}_signals.csv`, ev.signalsCsv);
     else openPrintWindow(ev.title, ev.markdown);
   };
   return (
@@ -1486,6 +1487,14 @@ function EvidenceExportButtons({
         title="Download rationale, matched signals and sources as JSON"
       >
         <Download size={10} /> JSON
+      </button>
+      <button
+        type="button"
+        onClick={() => doExport("csv")}
+        className="inline-flex items-center gap-1 rounded border border-border bg-background px-2 py-1 font-mono text-[10px] uppercase tracking-widest hover:bg-accent"
+        title="Download matched signals (IDs, keywords, actors) with timestamps as CSV"
+      >
+        <Download size={10} /> CSV
       </button>
       <button
         type="button"
