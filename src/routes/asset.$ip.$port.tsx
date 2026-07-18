@@ -25,6 +25,7 @@ import {
   downloadJson,
   downloadMarkdown,
   openPrintWindow,
+  downloadCsv,
 } from "@/lib/sentinel-report";
 
 type Search = {
