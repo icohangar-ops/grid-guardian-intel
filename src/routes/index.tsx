@@ -25,6 +25,7 @@ import {
   type KevReport,
   type AttackMapping,
 } from "@/lib/sentinel.functions";
+import { getProximityFeed, type ProximityFeed, type GeoEvent } from "@/lib/sentinel-geo.functions";
 import {
   loadBriefs,
   saveBrief,
