@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
 import { queryOptions, useSuspenseQuery, useMutation } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   listExposedAssets,
   analyzeAsset,
@@ -234,6 +234,35 @@ function ToolkitPanel({
   error?: string;
   onLoad: (asset: OsintAsset) => void;
 }) {
+  const [search, setSearch] = useState("");
+  const [tags, setTags] = useState<{
+    free: boolean;
+    api: boolean;
+    noAuth: boolean;
+  }>({ free: false, api: false, noAuth: false });
+
+  const filtered = useMemo(() => {
+    if (!toolkit) return [];
+    const q = search.trim().toLowerCase();
+    const groups = toolkit.groups.map((g) => {
+      const tools = g.tools.filter((t) => {
+        if (tags.free && t.pricing && t.pricing !== "free") return false;
+        if (tags.api && !t.api) return false;
+        if (tags.noAuth && t.registration) return false;
+        if (!q) return true;
+        return (
+          t.name.toLowerCase().includes(q) ||
+          t.description?.toLowerCase().includes(q) ||
+          g.category.toLowerCase().includes(q)
+        );
+      });
+      return { category: g.category, tools };
+    });
+    return groups.filter((g) => g.tools.length > 0);
+  }, [toolkit, search, tags]);
+
+  const matchCount = filtered.reduce((n, g) => n + g.tools.length, 0);
+
   if (!asset) {
     return (
       <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
@@ -266,11 +295,31 @@ function ToolkitPanel({
       </div>
     );
   }
+  const TagChip = ({
+    active,
+    onClick,
+    label,
+  }: {
+    active: boolean;
+    onClick: () => void;
+    label: string;
+  }) => (
+    <button
+      onClick={onClick}
+      className={`rounded-full border px-2 py-0.5 text-[10px] font-mono uppercase tracking-wider transition-colors ${
+        active
+          ? "border-primary bg-primary/15 text-primary"
+          : "border-border bg-background text-muted-foreground hover:bg-accent"
+      }`}
+    >
+      {label}
+    </button>
+  );
   return (
     <div className="space-y-3 rounded-lg border border-border bg-card p-4">
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span className="font-mono">
-          {toolkit.groups.length} categories · {toolkit.total} tools indexed
+          {filtered.length} categories · {matchCount} / {toolkit.total} tools
         </span>
         <a
           href="https://github.com/lockfale/osint-framework"
@@ -281,9 +330,54 @@ function ToolkitPanel({
           source
         </a>
       </div>
+      <div className="space-y-2">
+        <input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search tools, categories, descriptions…"
+          className="w-full rounded-md border border-border bg-background px-3 py-1.5 font-mono text-xs"
+        />
+        <div className="flex flex-wrap items-center gap-1.5">
+          <TagChip
+            active={tags.free}
+            onClick={() => setTags((t) => ({ ...t, free: !t.free }))}
+            label="free"
+          />
+          <TagChip
+            active={tags.api}
+            onClick={() => setTags((t) => ({ ...t, api: !t.api }))}
+            label="api"
+          />
+          <TagChip
+            active={tags.noAuth}
+            onClick={() => setTags((t) => ({ ...t, noAuth: !t.noAuth }))}
+            label="no signup"
+          />
+          {(search || tags.free || tags.api || tags.noAuth) && (
+            <button
+              onClick={() => {
+                setSearch("");
+                setTags({ free: false, api: false, noAuth: false });
+              }}
+              className="ml-auto text-[10px] font-mono uppercase tracking-wider text-muted-foreground hover:text-foreground"
+            >
+              clear
+            </button>
+          )}
+        </div>
+      </div>
       <div className="max-h-[520px] space-y-3 overflow-y-auto pr-1">
-        {toolkit.groups.map((g) => (
-          <details key={g.category} className="rounded-md border border-border/60">
+        {filtered.length === 0 && (
+          <div className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
+            No tools match those filters.
+          </div>
+        )}
+        {filtered.map((g) => (
+          <details
+            key={g.category}
+            open={Boolean(search) || matchCount < 25}
+            className="rounded-md border border-border/60"
+          >
             <summary className="cursor-pointer select-none px-3 py-2 text-xs font-mono uppercase tracking-wider text-muted-foreground hover:bg-accent/30">
               {g.category}{" "}
               <span className="text-foreground">({g.tools.length})</span>
